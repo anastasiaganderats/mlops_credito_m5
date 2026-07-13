@@ -29,13 +29,13 @@ El modelo opera bajo principios MLOps: estructura de carpetas estricta, versiona
 - **Etapa modelado (Avance 2)**: verificacion complementaria detecta que `puntaje` (score interno) presenta AUC univariada = 1.0 y capturaba 74% de la importancia del Random Forest. Hipotesis: score post-hoc calculado a partir del comportamiento observado, o output de un modelo previo entrenado sobre estos mismos datos. Se excluye.
 - `puntaje_datacredito` (score externo del buro Datacredito, AUC 0.62) se mantiene: informacion disponible al momento de la solicitud.
 
-### Modelamiento
+### Modelamiento (Avance 2)
 
 Se comparan 5 modelos baseline y 3 optimizados con SMOTE + GridSearchCV:
 
 | Modelo | ROC-AUC | F1 clase 0 | Notas |
 |--------|---------|------------|-------|
-| LGBM baseline | 0.6482 | 0.1860 | Seleccionado como final |
+| **LGBM baseline** | 0.6482 | **0.1860** | Seleccionado como final |
 | LogReg | 0.6613 | 0.1345 | Mejor recall clase 0 |
 | XGBoost | 0.6578 | 0.1606 | |
 | Random Forest | 0.6436 | 0.0877 | |
@@ -47,50 +47,88 @@ Se comparan 5 modelos baseline y 3 optimizados con SMOTE + GridSearchCV:
 **Modelo final**: LightGBM baseline con `class_weight='balanced'`.
 **Threshold de decision optimizado**: 0.35 (F1 macro), en lugar del 0.5 default.
 
+### Monitoreo de drift (Avance 3)
+
+Sobre split temporal por `fecha_prestamo` (70% mas antiguo como historico de referencia, 30% mas reciente como periodo actual):
+
+| Periodo | Rango de fechas | Registros |
+|---------|-----------------|-----------|
+| Historico (referencia) | 2024-11-26 a 2025-05-26 | 7.534 |
+| Actual (produccion simulada) | 2025-05-26 a 2026-04-26 | 3.229 |
+
+**Data drift por variable** (24 variables analizadas):
+
+| Nivel | Cantidad | Ejemplos representativos |
+|-------|----------|--------------------------|
+| Drift severo | 6 | total_otros_prestamos, promedio_ingresos_datacredito, ratio_otros_salario, endeudamiento_total, plazo_meses, mes_prestamo |
+| Drift moderado | 10 | capital_prestado, salario_cliente, cuota_pactada, ratios varios |
+| Sin drift | 8 | puntaje_datacredito, edad_cliente, otros |
+
+Metricas aplicadas: Kolmogorov-Smirnov, Population Stability Index (PSI), Jensen-Shannon divergence, Chi-cuadrado.
+
+**Model drift**:
+
+| Metrica | Historico | Actual | Delta |
+|---------|-----------|--------|-------|
+| ROC-AUC | 0.9383 | 0.9172 | -0.0211 |
+| F1 macro | 0.7936 | 0.8409 | +0.0473 |
+| F1 clase 0 | 0.6181 | 0.6939 | +0.0758 |
+| Tasa impago real | 5.35% | 3.34% | -2.01 pp |
+| Tasa impago predicha | 9.60% | 4.24% | -5.36 pp |
+
+Caida de ROC-AUC (0.0211) esta dentro del umbral configurado (0.05). El modelo se mantiene estable en performance pese al drift detectado en las features.
+
+**Recomendacion automatica**: MONITOREO_REFORZADO con reentrenamiento preventivo, ya que multiples variables presentan drift severo aunque la performance se mantiene.
+
 ---
 
 ## Estructura del repositorio
 
 ```
 PI/
-├── mlops_pipeline/
-│   ├── set_up.bat                       # Crea venv e instala dependencias
-│   ├── requirements.txt
-│   └── src/
-│       ├── config.json                  # Metadatos del proyecto
-│       ├── Cargar_datos.ipynb           # Avance 1 - Carga y validacion
-│       ├── comprension_eda.ipynb        # Avance 1 - EDA completo
-│       ├── ft_engineering.py            # Avance 2 - Feature engineering
-│       ├── model_training_evaluation.py # Avance 2 - Entrenamiento y evaluacion
-│       ├── modelamiento.ipynb           # Avance 2 - Analisis con visualizaciones
-│       ├── model_deploy.py              # Avance 4 - FastAPI (placeholder)
-│       └── model_monitoring.py          # Avance 3 - Drift (placeholder)
-├── models/
-│   ├── best_model.joblib                # Pipeline ganador (preproc + LGBM)
-│   ├── preprocessor.joblib              # ColumnTransformer ajustado
-│   ├── threshold_optimo.json            # Umbral 0.35 + metricas asociadas
-│   ├── model_metrics.json               # Metricas de todos los modelos
-│   ├── comparacion_modelos.png          # Visualizacion comparativa
-│   ├── curvas_roc.png
-│   ├── curvas_pr.png
-│   ├── matrices_confusion.png
-│   ├── feature_importance.png
-│   └── threshold_tuning.png
-├── data_processed/
-│   ├── dataset_limpio.parquet           # Output Cargar_datos
-│   ├── reglas_validacion.json           # Contrato de datos para produccion
-│   ├── X_train.parquet, X_test.parquet  # Splits
-│   ├── y_train.parquet, y_test.parquet
-│   ├── X_train_transformed.parquet      # Post-preprocessor
-│   ├── X_test_transformed.parquet
-│   └── feature_cols.json                # Catalogo de features
-├── streamlit_app/                       # Avance 3 (aun no implementado)
-├── tests/                               # Extra Credit (aun no implementado)
-├── .github/workflows/                   # Extra Credit (aun no implementado)
-├── Base_de_datos.csv                    # Dataset fuente
-├── requirements.txt
-├── .gitignore
-└── readme.md
+|-- mlops_pipeline/
+|   |-- set_up.bat                       # Crea venv e instala dependencias
+|   |-- requirements.txt
+|   `-- src/
+|       |-- config.json                  # Metadatos del proyecto
+|       |-- Cargar_datos.ipynb           # Avance 1 - Carga y validacion
+|       |-- comprension_eda.ipynb        # Avance 1 - EDA completo
+|       |-- ft_engineering.py            # Avance 2 - Feature engineering
+|       |-- model_training_evaluation.py # Avance 2 - Entrenamiento y evaluacion
+|       |-- modelamiento.ipynb           # Avance 2 - Analisis con visualizaciones
+|       |-- model_monitoring.py          # Avance 3 - Drift detection
+|       `-- model_deploy.py              # Avance 4 - FastAPI (placeholder)
+|-- models/
+|   |-- best_model.joblib                # Pipeline ganador (preproc + LGBM)
+|   |-- preprocessor.joblib              # ColumnTransformer ajustado
+|   |-- threshold_optimo.json            # Umbral 0.35
+|   |-- model_metrics.json               # Metricas de todos los modelos
+|   |-- comparacion_modelos.png          # Visualizacion comparativa
+|   |-- curvas_roc.png
+|   |-- curvas_pr.png
+|   |-- matrices_confusion.png
+|   |-- feature_importance.png
+|   `-- threshold_tuning.png
+|-- data_processed/
+|   |-- dataset_limpio.parquet           # Output Cargar_datos
+|   |-- reglas_validacion.json           # Contrato de datos para produccion
+|   |-- X_train.parquet, X_test.parquet  # Splits
+|   |-- y_train.parquet, y_test.parquet
+|   |-- X_train_transformed.parquet      # Post-preprocessor
+|   |-- X_test_transformed.parquet
+|   |-- feature_cols.json                # Catalogo de features
+|   |-- prediction_log.csv               # Log de predicciones para drift
+|   |-- drift_metrics.csv                # Metricas de drift por variable
+|   |-- drift_summary.json               # Resumen ejecutivo del drift
+|   `-- model_performance_drift.json     # Model drift detallado
+|-- streamlit_app/
+|   `-- app.py                           # Dashboard de monitoreo
+|-- tests/                               # Extra Credit (aun no implementado)
+|-- .github/workflows/                   # Extra Credit (aun no implementado)
+|-- Base_de_datos.csv                    # Dataset fuente
+|-- requirements.txt
+|-- .gitignore
+`-- readme.md
 ```
 
 ---
@@ -99,53 +137,72 @@ PI/
 
 ### 1. Clonar el repositorio
 
-```bash
-git clone <URL_DEL_REPO>
-cd PI
+```cmd
+git clone https://github.com/anastasiaganderats/mlops_credito_m5.git
+cd mlops_credito_m5
 ```
 
 ### 2. Crear entorno virtual y registrar kernel Jupyter
 
-```bash
+```cmd
 cd mlops_pipeline
 .\set_up.bat
 cd ..
 ```
 
 Crea `mlops_pipeline/mlops_credito_m5-venv/` e instala las dependencias.
-Requiere Python 3.10, 3.11 o 3.12 (Python 3.13/3.14 no tienen wheels disponibles para varias librerias del stack).
+Requiere Python 3.10, 3.11 o 3.12 (Python 3.13 y 3.14 no tienen wheels disponibles para varias librerias del stack).
 
 ### 3. Activar el entorno
 
-```bash
+```cmd
 mlops_pipeline\mlops_credito_m5-venv\Scripts\activate
 ```
 
-### 4. Ejecutar el pipeline
+En PowerShell:
 
-```bash
+```powershell
+mlops_pipeline\mlops_credito_m5-venv\Scripts\Activate.ps1
+```
+
+El prompt debe cambiar a `(mlops_credito_m5-venv) C:\...`.
+
+### 4. Ejecutar el pipeline en orden
+
+```cmd
 cd mlops_pipeline\src
-jupyter notebook Cargar_datos.ipynb        # Avance 1 - carga
-jupyter notebook comprension_eda.ipynb     # Avance 1 - EDA
-python ft_engineering.py                   # Avance 2 - feature engineering
-python model_training_evaluation.py        # Avance 2 - modelado end-to-end
-jupyter notebook modelamiento.ipynb        # Avance 2 - analisis con visualizaciones
+jupyter notebook Cargar_datos.ipynb            # Avance 1 - carga
+jupyter notebook comprension_eda.ipynb         # Avance 1 - EDA
+python ft_engineering.py                       # Avance 2 - features
+python model_training_evaluation.py            # Avance 2 - modelado end-to-end
+jupyter notebook modelamiento.ipynb            # Avance 2 - analisis con visualizaciones
+python model_monitoring.py                     # Avance 3 - drift
+cd ..\..
+streamlit run streamlit_app\app.py             # Avance 3 - dashboard
 ```
 
 ---
 
 ## Ramas y versionado
 
-Tres ramas Git con cuatro tags semanticos:
+```
+                  V1.0.0       V1.0.1       V1.1.0       V1.1.1
+master:           o------------o------------o------------o
+                  |            |            |            |
+certification: ---o------------o------------o------------o
+                  |            |            |            |
+developer:    ----o------------o------------o------------o
+                  estructura   carga+EDA    FE+modelado  drift+API+Docker
+```
 
-| Version | Contenido |
-|---------|-----------|
-| V1.0.0 | Estructura inicial |
-| V1.0.1 | Avance 1: Carga + EDA |
-| V1.1.0 | Avance 2: Feature Engineering + Modelado |
-| V1.1.1 | Avances 3 y 4: Drift + Dashboard + FastAPI + Docker |
+| Version | Avance | Contenido |
+|---------|--------|-----------|
+| V1.0.0 | - | Estructura inicial del proyecto |
+| V1.0.1 | 1 | Cargar_datos + comprension_eda |
+| V1.1.0 | 2 | ft_engineering + model_training_evaluation + modelamiento.ipynb |
+| V1.1.1 | 3 + 4 | model_monitoring + Streamlit + FastAPI + Dockerfile |
 
-Flujo de PR: `developer` → `certification` → `master` → tag.
+Flujo de pull request: `developer` -> `certification` (validacion) -> `master` (produccion estable).
 
 ---
 
@@ -155,7 +212,7 @@ Flujo de PR: `developer` → `certification` → `master` → tag.
 - **Datos**: pandas, numpy, pyarrow, openpyxl
 - **Visualizacion**: matplotlib, seaborn
 - **ML**: scikit-learn, xgboost, lightgbm, imbalanced-learn, feature-engine
-- **Estadistica**: scipy (KS test, chi-cuadrado, Mann-Whitney U)
+- **Estadistica y drift**: scipy (KS, Jensen-Shannon, chi-cuadrado), PSI (implementacion manual)
 - **API**: FastAPI, uvicorn, pydantic
 - **Dashboard**: Streamlit
 - **Despliegue**: Docker
@@ -166,6 +223,6 @@ Flujo de PR: `developer` → `certification` → `master` → tag.
 ## Autora
 
 **Anastasia Ganderats**
-Socióloga | Data Scientist
+Sociologa | Data Scientist
 aganderatsi@gmail.com
 Henry - Modulo 5 - Cohorte 2026
