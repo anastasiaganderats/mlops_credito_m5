@@ -61,73 +61,55 @@ def preparar_features(df):
                 + fc['categoricas_nominales'] + fc['categoricas_ordinales'])
     return df[columnas].copy()
 
-
-def main():
+def main() -> None:
     print("=" * 70)
-    print("DRIFT REPORT CON EVIDENTLY - V1.1.1 (Avance 3 extension)")
+    print("MONITOREO DE DATA DRIFT - EVIDENTLY")
     print("=" * 70)
 
-    # 1. Cargar dataset
-    print("\n[1/4] Cargando dataset limpio...")
-    df = load_clean_dataset()
-    print(f"  Dataset: {len(df):,} filas x {df.shape[1]} columnas")
-
-    # 2. Split temporal
-    print(f"\n[2/4] Split temporal {int(PROPORCION_HISTORICA*100)}/{int((1-PROPORCION_HISTORICA)*100)}...")
-    df_hist, df_act = split_temporal(df)
-    print(f"  Historico:  n={len(df_hist):,}")
-    print(f"  Actual:     n={len(df_act):,}")
-
-    # 3. Preparar features (mismas que se usan en el modelo)
-    print("\n[3/4] Preparando features (excluyendo leakage)...")
-    X_hist = preparar_features(df_hist)
-    X_act = preparar_features(df_act)
-    print(f"  Columnas a comparar: {X_hist.shape[1]}")
-    print(f"  Leakage excluido: {COLUMNAS_LEAKAGE}")
-
-    # 4. Generar reporte Evidently
-    print("\n[4/4] Generando reporte Evidently...")
     try:
-        from evidently import Report
-        from evidently.presets import DataDriftPreset
-    except ImportError as e:
-        print(f"\n[ERROR] Evidently no esta instalado. Ejecuta:")
-        print(f"    pip install evidently")
-        print(f"\nDetalle: {e}")
-        return
+        print("\n[1/4] Cargando dataset limpio...")
+        df = load_clean_dataset()
+        
+        print("[2/4] Aplicando partición temporal...")
+        X_hist, X_act = split_temporal(df)
+        
+        print("[3/4] Preparando features...")
+        X_hist = preparar_features(X_hist)
+        X_act = preparar_features(X_act)
+        
+        # Asegurar tipos estándar de pandas para evitar conflictos en Evidently
+        X_hist = X_hist.reset_index(drop=True)
+        X_act = X_act.reset_index(drop=True)
 
-    report = Report(metrics=[DataDriftPreset()])
-    result = report.run(reference_data=X_hist, current_data=X_act)
+        print(f"  Dimensiones Histórico: {X_hist.shape}")
+        print(f"  Dimensiones Actual:    {X_act.shape}")
 
-    # Guardar HTML
-    html_path = DATA_PROC_DIR / "drift_evidently_report.html"
-    result.save_html(str(html_path))
-    print(f"  Reporte HTML: {html_path}")
+        print("\n[4/4] Generando reporte Evidently...")
+        from evidently.report import Report
+        from evidently.metric_preset import DataDriftPreset
 
-    # Extraer resumen programatico
-    try:
-        result_dict = result.as_dict() if hasattr(result, 'as_dict') else {}
+        report = Report(metrics=[DataDriftPreset()])
+        
+        # Ejecución del reporte
+        print("  Ejecutando report.run()...")
+        report.run(reference_data=X_hist, current_data=X_act)
+
+        DATA_PROC_DIR.mkdir(parents=True, exist_ok=True)
+
+        html_path = DATA_PROC_DIR / "drift_evidently_report.html"
+        report.save_html(str(html_path))
+        print(f"  [OK] Reporte HTML guardado en: {html_path}")
+
         summary_path = DATA_PROC_DIR / "drift_evidently_summary.json"
+        result_dict = report.as_dict() if hasattr(report, 'as_dict') else {}
         with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump({
-                "engine": "evidently",
-                "metric": "DataDriftPreset",
-                "n_reference": len(X_hist),
-                "n_current": len(X_act),
-                "n_features_compared": X_hist.shape[1],
-                "columnas_leakage_excluidas": COLUMNAS_LEAKAGE,
-                "html_report": str(html_path.name),
-                "result_dict_sample": result_dict if isinstance(result_dict, dict) else str(result_dict)[:500],
-            }, f, indent=2, ensure_ascii=False, default=str)
-        print(f"  Resumen JSON: {summary_path}")
+            json.dump(result_dict, f, indent=2, ensure_ascii=False)
+        print(f"  [OK] Resumen JSON guardado en: {summary_path}")
+
     except Exception as e:
-        print(f"  [WARN] No se pudo extraer summary programatico: {e}")
-
-    print("\n" + "=" * 70)
-    print("Reporte Evidently generado. Abrir en navegador:")
-    print(f"  file:///{html_path.as_posix()}")
-    print("=" * 70)
-
+        print(f"\n[ERROR CRÍTICO DETECTADO]: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
