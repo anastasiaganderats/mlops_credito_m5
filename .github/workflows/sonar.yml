@@ -28,8 +28,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip uninstall -y multipart || true
+          # Forzamos la eliminación de ambos para evitar colisiones en pip
+          pip uninstall -y multipart python-multipart || true
+          # Instalamos los requirements primero
           pip install -r requirements.txt
+          # Forzamos la instalación limpia y explícita de python-multipart al final
+          pip install --force-reinstall python-multipart
           pip install pytest pytest-cov
 
       - name: Run tests with coverage (genera coverage.xml para SonarCloud)
@@ -45,3 +49,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          
