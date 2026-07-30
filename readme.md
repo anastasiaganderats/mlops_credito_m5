@@ -96,8 +96,11 @@ PI/
 |       |-- ft_engineering.py            # Avance 2 - Feature engineering
 |       |-- model_training_evaluation.py # Avance 2 - Entrenamiento y evaluacion
 |       |-- modelamiento.ipynb           # Avance 2 - Analisis con visualizaciones
-|       |-- model_monitoring.py          # Avance 3 - Drift detection
-|       `-- model_deploy.py              # Avance 4 - FastAPI (placeholder)
+|       |-- model_monitoring.py          # Avance 3 - Drift detection (KS/PSI/JS/Chi2)
+|       `-- model_deploy.py              # Avance 4 - FastAPI (8 endpoints)
+|-- Dockerfile                           # Avance 4 - imagen Python 3.10-slim
+|-- .dockerignore
+|-- sonar-project.properties             # Extra Credit - configuracion SonarCloud
 |-- models/
 |   |-- best_model.joblib                # Pipeline ganador (preproc + LGBM)
 |   |-- preprocessor.joblib              # ColumnTransformer ajustado
@@ -122,9 +125,9 @@ PI/
 |   |-- drift_summary.json               # Resumen ejecutivo del drift
 |   `-- model_performance_drift.json     # Model drift detallado
 |-- streamlit_app/
-|   `-- app.py                           # Dashboard de monitoreo
-|-- tests/                               # Extra Credit (aun no implementado)
-|-- .github/workflows/                   # Extra Credit (aun no implementado)
+|   `-- app.py                           # Dashboard de monitoreo (unica app de drift)
+|-- Dockerfile                           # Avance 4 - imagen Python 3.10-slim
+|-- .dockerignore
 |-- Base_de_datos.csv                    # Dataset fuente
 |-- requirements.txt
 |-- .gitignore
@@ -183,6 +186,67 @@ streamlit run streamlit_app\app.py             # Avance 3 - dashboard
 
 ---
 
+## API FastAPI + Docker (Avance 4)
+
+La API expone 8 endpoints. Levantarla local requiere Docker:
+
+```powershell
+docker build -t mlops_credito_m5:latest .
+docker run -d --name credito_api -p 8000:8000 mlops_credito_m5:latest
+curl http://localhost:8000/health
+```
+
+Endpoints principales:
+
+| Metodo | Path | Descripcion |
+|--------|------|-------------|
+| GET | `/health` | Estado del servicio y del modelo cargado |
+| GET | `/info` | Metadata del modelo (version, features, threshold) |
+| POST | `/predict` | Prediccion individual (JSON con schema `ClienteInput`) |
+| POST | `/predict_csv` | Prediccion batch (upload CSV) |
+| GET | `/evaluation` | Metricas del modelo sobre el test set |
+| GET | `/roc_curves` | Curvas ROC de todos los modelos comparados |
+| GET | `/drift` | Ultimas metricas de drift calculadas |
+| GET | `/docs` | Swagger UI interactivo |
+
+Documentacion interactiva: `http://localhost:8000/docs`.
+
+---
+
+## Calidad de codigo (Extra Credit)
+
+`sonar-project.properties` incluye la configuracion del proyecto para SonarCloud. Fue registrado como `anastasiaganderats_mlops_credito_m5` en la organizacion `anastasiaganderats`. Reporta bugs, code smells, duplicaciones y complejidad ciclomatica del codigo fuente.
+
+---
+
+## Enlace entre modulos (importante)
+
+Los modulos del pipeline **estan enlazados directamente por imports Python**, no dependen de archivos intermedios:
+
+| Modulo | Importa de `ft_engineering` |
+|--------|----------------------------|
+| `model_training_evaluation.py` | `build_preprocessor`, `prepare_dataset`, `MODELS_DIR`, `DATA_PROC_DIR` |
+| `model_monitoring.py` | `build_derived_features`, `MODELS_DIR`, `DATA_PROC_DIR` |
+| `model_deploy.py` | `build_derived_features`, `get_feature_columns`, `COLUMNAS_LEAKAGE`, `ORDEN_TENDENCIA` |
+
+Ejemplos concretos:
+
+- `model_training_evaluation.py` linea 310 llama `prepare_dataset()` que corre split + preprocessor + features en memoria.
+- `model_monitoring.py` linea 317 aplica `build_derived_features(df)` en memoria.
+- `model_deploy.py` aplica `build_derived_features` sobre cada request de la API antes de predecir.
+
+### Sobre `data_processed/`
+
+Los parquets en `data_processed/` **no son un requisito del flujo**, son un **cache auditable**:
+
+- Repetir un entrenamiento sin re-transformar (dev loop mas rapido).
+- Inspeccionar el output del preprocessor antes del modelado.
+- Correr `model_monitoring.py` de forma independiente para simular escenarios de drift sin volver a entrenar.
+
+El pipeline entrenado se serializa una sola vez en `models/best_model.joblib` (incluye preprocesamiento + modelo). La API y el monitoreo cargan ese joblib, no leen los parquets intermedios para inferir.
+
+---
+
 ## Ramas y versionado
 
 ```
@@ -197,10 +261,11 @@ developer:    ----o------------o------------o------------o
 
 | Version | Avance | Contenido |
 |---------|--------|-----------|
-| V1.0.0 | - | Estructura inicial del proyecto |
-| V1.0.1 | 1 | Cargar_datos + comprension_eda |
-| V1.1.0 | 2 | ft_engineering + model_training_evaluation + modelamiento.ipynb |
-| V1.1.1 | 3 + 4 | model_monitoring + Streamlit + FastAPI + Dockerfile |
+| V1.0.0 | - | Estructura inicial del proyecto (carpetas + gitkeep) |
+| V1.0.1 | 1 | Cargar_datos + comprension_eda + reglas_validacion |
+| V1.1.0 | 2 | ft_engineering (ColumnTransformer + 9 features derivadas) + model_training_evaluation (5 modelos + SMOTE + GridSearch + threshold tuning) + modelamiento.ipynb |
+| V1.1.1 | 3 + 4 | model_monitoring (KS/PSI/JS/Chi2) + streamlit_app + model_deploy (FastAPI 8 endpoints) + Dockerfile + .dockerignore |
+| (post V1.1.1) | Extra | sonar-project.properties (proyecto registrado en SonarCloud) |
 
 Flujo de pull request: `developer` -> `certification` (validacion) -> `master` (produccion estable).
 
@@ -213,10 +278,27 @@ Flujo de pull request: `developer` -> `certification` (validacion) -> `master` (
 - **Visualizacion**: matplotlib, seaborn
 - **ML**: scikit-learn, xgboost, lightgbm, imbalanced-learn, feature-engine
 - **Estadistica y drift**: scipy (KS, Jensen-Shannon, chi-cuadrado), PSI (implementacion manual)
-- **API**: FastAPI, uvicorn, pydantic
+- **API**: FastAPI, uvicorn, pydantic, python-multipart
 - **Dashboard**: Streamlit
-- **Despliegue**: Docker
-- **Testing y calidad**: pytest, pytest-cov, SonarCloud
+- **Despliegue**: Docker (Python 3.10-slim)
+- **Calidad de codigo**: SonarCloud
+
+---
+
+## Troubleshooting
+
+**El contenedor Docker falla con `Form data requires "python-multipart" to be installed`**
+Alguna dependencia transitiva (evidently u otro) instala el paquete rival `multipart`. El Dockerfile ya fuerza `pip uninstall multipart` + `pip install --force-reinstall python-multipart`. Si el error persiste, rebuild sin cache:
+```powershell
+docker rmi mlops_credito_m5:latest
+docker build --no-cache -t mlops_credito_m5:latest .
+```
+
+**Docker no puede alcanzar `registry-1.docker.io`**
+Reiniciar Docker Desktop o verificar conexion a internet. No es un problema del proyecto.
+
+**Python 3.13 o 3.14 no instala dependencias**
+Varias librerias del stack (lightgbm, xgboost) no tienen wheels para Python 3.13+. Usar Python 3.10, 3.11 o 3.12.
 
 ---
 

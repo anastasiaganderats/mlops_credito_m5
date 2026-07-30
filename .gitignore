@@ -75,9 +75,21 @@ Base_de_datos.xlsx
 # ==== SCRIPTS PERSONALES DE WORKFLOW (no van al repo) ====
 preparar_avance_*.bat
 commit_avance_*.bat
+preparar_extra_*.bat
+commit_extra_*.bat
 init_git_avance_*.bat
 init_git_v2.bat
 init_git.bat
+
+# ==== FEEDBACK PROFESOR: fuera del repo ====
+# Tests: uso local para dev, no forma parte de la consigna
+tests/
+# CI/CD workflow: sacado (sin tests el workflow perderia sentido)
+.github/
+# Drift Evidently: duplicaba streamlit_app/app.py
+mlops_pipeline/src/drift_evidently.py
+data_processed/drift_evidently_report.html
+data_processed/drift_evidently_summary.json
 
 # Temporales / miscelaneos
 image*.png
